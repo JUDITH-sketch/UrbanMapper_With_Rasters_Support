@@ -16,6 +16,7 @@ from urban_mapper.config import DEFAULT_CRS
 from urban_mapper.modules.loader.abc_loader import LoaderBase
 from urban_mapper.modules.loader.loaders.csv_loader import CSVLoader
 from urban_mapper.modules.loader.loaders.parquet_loader import ParquetLoader
+from .loaders.raster_loader import RasterLoader  # Importing RasterLoader of the new raster loader module
 from urban_mapper.modules.loader.loaders.shapefile_loader import ShapefileLoader
 from urban_mapper.utils import require_attributes
 from urban_mapper.utils.helpers.reset_attribute_before import reset_attributes_before
@@ -24,6 +25,12 @@ FILE_LOADER_FACTORY = {
     ".csv": {"class": CSVLoader, "requires_columns": True},
     ".shp": {"class": ShapefileLoader, "requires_columns": False},
     ".parquet": {"class": ParquetLoader, "requires_columns": True},
+    # Adding of new formats supported by RasterLoader
+    ".tif": {"class": RasterLoader, "requires_columns": False},
+    ".tiff": {"class": RasterLoader, "requires_columns": False},
+    ".jp2": {"class": RasterLoader, "requires_columns": False},
+    ".png": {"class": RasterLoader, "requires_columns": False},
+
 }
 
 
@@ -84,8 +91,8 @@ class LoaderFactory:
 
         This method sets up the factory to load data from a file path. The file format
         is determined by the file extension. Supported formats include `CSV`, `shapefile`,
-        and `Parquet`.
-
+        and `Parquet`. 
+        
         Args:
             file_path: Path to the data file to load.
 
