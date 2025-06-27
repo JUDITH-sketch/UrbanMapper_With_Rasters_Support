@@ -11,7 +11,37 @@ class RasterLoader(LoaderBase):
         Initializes the RasterLoader with the path to the raster file.
         """
         super().__init__(file_path)
-        print("RasterLoader initialisé pour :", file_path)
+    
+    def set_raster_strategy(self, strategy):
+        """
+        Sets the raster conversion strategy (e.g., 'points', 'polygons', etc.).
+        """
+        self.raster_strategy = strategy
+
+    def set_sampling_factor(self, sampling_factor):
+        """
+        Sets the spatial sampling factor (float between 0 and 1).
+        """
+        self.sampling_factor = sampling_factor
+
+    def set_band_selection(self, bands):
+        """
+        Sets the band(s) to load (e.g., [1], [1,2,3], etc.).
+        """
+        self.band_selection = bands
+
+    def set_nodata_handling(self, nodata_handling):
+        """
+        Sets the policy for handling nodata values (e.g., 'ignore', 'mask', etc.).
+        """
+        self.nodata_handling = nodata_handling
+
+    def set_max_pixels(self, max_pixels):
+        """
+        Sets the maximum number of pixels to load (to avoid memory issues).
+        """
+        self.max_pixels = max_pixels
+
 
     def _load_data_from_file(self):
         """
