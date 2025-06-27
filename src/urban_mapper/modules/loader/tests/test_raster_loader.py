@@ -18,6 +18,7 @@ def test_raster_loader_setters():
     assert loader.nodata_handling == "ignore"
     assert loader.max_pixels == 10000
 
+<<<<<<< HEAD
 def test_raster_loader_load_missing_file():
     loader = RasterLoader("fake_path.tif")
     with pytest.raises(RuntimeError) as excinfo:
@@ -39,4 +40,10 @@ def test_geotiff_loading():
     assert "transform" in result
 
 
+=======
+def test_raster_loader_load_not_implemented():
+    loader = RasterLoader("fake_path.tif")
+    with pytest.raises(NotImplementedError):
+        loader._load_data_from_file()
+>>>>>>> 966824d ("feat: implement basic GeoTIFF loading in RasterLoader with rasterio")
 
