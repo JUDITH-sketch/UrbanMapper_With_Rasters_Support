@@ -11,6 +11,7 @@ class RasterLoader(LoaderBase):
         Initializes the RasterLoader with the path to the raster file.
         """
         super().__init__(file_path)
+        print("RasterLoader initialisé pour :", file_path)
 
     def _load_data_from_file(self):
         """
