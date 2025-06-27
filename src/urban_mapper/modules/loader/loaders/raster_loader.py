@@ -45,10 +45,22 @@ class RasterLoader(LoaderBase):
 
     def _load_data_from_file(self):
         """
-        Method to implement: will load raster data and return a standard object.
-        For now, raises a NotImplementedError.
+        load raster data and return a standard keys infos in a dictionnaire. 
         """
-        raise NotImplementedError("Raster support is not yet implemented.")
+        import rasterio
+        try:
+            with rasterio.open(self.file_path) as src:
+                data = src.read(1)  # read the first band
+                profile = src.profile
+            # return a dictionary with standard keys
+            return {
+                'data_shape': data.shape,
+                'data_dtype': data.dtype.name,
+                'crs': str(profile['crs']),
+                'transform': str(profile['transform'])
+            }
+        except Exception as e:
+            raise RuntimeError(f"Error in the loading of the raster {e}")
 
     def preview(self, n=5):
         """
