@@ -6,7 +6,7 @@ class RasterLoader(LoaderBase):
     For now, this is only a skeleton without reading logic.
     """
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, latitude_column=None, longitude_column=None, coordinate_reference_system=None, **kwargs):
         """
         Initializes the RasterLoader with the path to the raster file.
         """
