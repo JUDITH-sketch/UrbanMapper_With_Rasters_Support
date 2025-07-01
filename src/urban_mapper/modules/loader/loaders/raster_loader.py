@@ -21,11 +21,7 @@ class RasterLoader(LoaderBase):
         >>> print(loader.preview())
     """
 
-<<<<<<< HEAD
     def __init__(self, file_path: str):
-=======
-    def __init__(self, file_path, latitude_column=None, longitude_column=None, coordinate_reference_system=None, **kwargs):
->>>>>>> 21ed407 (feat "modification of "raster_loader.py")
         """
         Initialise le RasterLoader avec le chemin du fichier raster.
 
