@@ -18,8 +18,25 @@ def test_raster_loader_setters():
     assert loader.nodata_handling == "ignore"
     assert loader.max_pixels == 10000
 
-def test_raster_loader_load_not_implemented():
+def test_raster_loader_load_missing_file():
     loader = RasterLoader("fake_path.tif")
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError) as excinfo:
         loader._load_data_from_file()
+    assert "No such file or directory" in str(excinfo.value)
+
+import os
+
+def test_geotiff_loading():
+
+    test_path = os.path.join(os.path.dirname(__file__), "data", "output_be.tif")
+    if not os.path.exists(test_path):
+        pytest.skip("GeoTIFF for test missing")
+    loader = RasterLoader(test_path)
+    result = loader._load_data_from_file()
+    assert "data_shape" in result
+    assert "data_dtype" in result
+    assert "crs" in result
+    assert "transform" in result
+
+
 
