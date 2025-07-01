@@ -45,22 +45,36 @@ class RasterLoader(LoaderBase):
 
     def _load_data_from_file(self):
         """
-        load raster data and return a standard keys infos in a dictionnaire. 
+        load raster data and return a standard keys infos in a dictionnary.
+        Supports GeoTIFF and PNG+world file. 
         """
+        import os
         import rasterio
-        try:
-            with rasterio.open(self.file_path) as src:
-                data = src.read(1)  # read the first band
-                profile = src.profile
-            # return a dictionary with standard keys
-            return {
-                'data_shape': data.shape,
-                'data_dtype': data.dtype.name,
-                'crs': str(profile['crs']),
-                'transform': str(profile['transform'])
-            }
-        except Exception as e:
-            raise RuntimeError(f"Error in the loading of the raster {e}")
+        from PIL import Image
+        import numpy as np
+
+        ext = os.path.splitext(self.file_path)[1].lower()
+
+        if ext in ['.tif', '.tiff']:  # GeoTIFF 
+            try:
+                with rasterio.open(self.file_path) as src:
+                    data = src.read(1)  # read the first band
+                    profile = src.profile
+                # return a dictionary with standard keys
+                return {
+                    'data_shape': data.shape,
+                    'data_dtype': data.dtype.name,
+                    'crs': str(profile['crs']),
+                    'transform': str(profile['transform'])
+                }
+            except Exception as e:
+                raise RuntimeError(f"Error in the loading of the raster {e}")
+            
+        elif ext == ".png": # Load PNG with world file
+            return self._load_png_with_worldfile()
+
+        else:
+            raise RuntimeError(f"Unsupported raster format: {ext}")
     
     def _load_png_with_worldfile(self):
         """
