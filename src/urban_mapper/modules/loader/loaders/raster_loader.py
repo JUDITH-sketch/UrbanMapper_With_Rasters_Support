@@ -44,20 +44,29 @@ class RasterLoader(LoaderBase):
         Raises:
             RuntimeError: Si le fichier ne peut pas être lu.
         """
-        try:
-            # Ouvre le fichier raster avec rasterio
-            with rasterio.open(self.file_path) as src:
-                # Lit toutes les bandes du raster
-                self.data = src.read()
-                # Stocke les métadonnées du raster
-                self.meta = src.meta
-            # Retourne les données raster
-            return self.data
-        except Exception as e:
-            # En cas d'erreur, lève une exception avec un message explicite
-            raise RuntimeError(f"Erreur lors du chargement du raster : {e}")
+        self.max_pixels = max_pixels
 
-    def preview(self, format: str = "ascii") -> Any:
+
+    def _load_data_from_file(self):
+        """
+        load raster data and return a standard keys infos in a dictionnaire. 
+        """
+        import rasterio
+        try:
+            with rasterio.open(self.file_path) as src:
+                data = src.read(1)  # read the first band
+                profile = src.profile
+            # return a dictionary with standard keys
+            return {
+                'data_shape': data.shape,
+                'data_dtype': data.dtype.name,
+                'crs': str(profile['crs']),
+                'transform': str(profile['transform'])
+            }
+        except Exception as e:
+            raise RuntimeError(f"Error in the loading of the raster {e}")
+    
+    def _load_png_with_worldfile(self):
         """
         Génère un aperçu du raster chargé.
 
