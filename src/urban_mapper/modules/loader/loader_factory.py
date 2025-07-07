@@ -472,7 +472,7 @@ class LoaderFactory:
         )
         return self
 
-    def _load_from_file(self, coordinate_reference_system: str) -> gpd.GeoDataFrame:
+    def _load_from_file(self, coordinate_reference_system: str):
 =======
     def _load_from_file(self, coordinate_reference_system: str):
 >>>>>>> fa17040 (feat : example)
