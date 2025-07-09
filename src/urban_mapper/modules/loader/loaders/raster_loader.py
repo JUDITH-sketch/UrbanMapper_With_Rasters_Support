@@ -22,19 +22,18 @@ class RasterLoader(LoaderBase):
         >>> raster = loader._load_data_from_file()
         >>> print(loader.preview())
     """
-
-    def __init__(self, file_path: str):
-        """
-        Initialise le RasterLoader avec le chemin du fichier raster.
-
-        Args:
-            file_path (str): Chemin vers le fichier raster à charger.
-        """
-        # Appel du constructeur parent
+    def __init__(
+        self,
+        file_path: str,
+        latitude_column=None,
+        longitude_column=None,
+        coordinate_reference_system=None,
+        map_columns=None,
+        **kwargs
+    ):
         super().__init__(file_path)
-        # Initialisation des attributs pour stocker les données et les métadonnées
-        self.data = None
-        self.meta = None
+        # Les autres paramètres sont ignorés mais acceptés pour compatibilité
+
 
     def _load_data_from_file(self) -> Any:
         """
