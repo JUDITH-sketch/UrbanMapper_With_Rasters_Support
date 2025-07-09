@@ -446,7 +446,6 @@ class LoaderFactory:
         )
         return self
 
-<<<<<<< HEAD
     def with_map(
         self,
         map_columns: Dict[str, str],
@@ -473,9 +472,6 @@ class LoaderFactory:
         return self
 
     def _load_from_file(self, coordinate_reference_system: str):
-=======
-    def _load_from_file(self, coordinate_reference_system: str):
->>>>>>> fa17040 (feat : example)
         file_path: str = self.source_data
         file_ext = Path(file_path).suffix.lower()
         loader_class = FILE_LOADER_FACTORY[file_ext]["class"]
