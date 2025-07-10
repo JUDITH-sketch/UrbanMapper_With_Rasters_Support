@@ -1,27 +1,32 @@
 from ..abc_loader import LoaderBase
-import rasterio  # Pour lire les fichiers raster
-from typing import Any  # Pour l'annotation de type dans preview
-
-import rasterio  # Pour lire les fichiers raster
-from typing import Any  # Pour l'annotation de type dans preview
+import rasterio  # To read raster files
+from typing import Any  # For type annotation in preview
+import numpy as np  
+import geopandas as gpd
+from shapely.geometry import Polygon
+from rasterio.transform import xy
+from pyproj import CRS,Transformer
 
 class RasterLoader(LoaderBase):
+    
     """
-    Loader pour fichiers raster (GeoTIFF, TIFF, etc.).
+    Loader for raster files (GeoTIFF, PNG+world file, etc.).
 
-    Ce loader permet de charger des fichiers raster et d'obtenir un aperçu rapide de leurs propriétés.
-    Il utilise la librairie rasterio pour la lecture des fichiers.
+    This loader reads raster files and exposes their content as a GeoDataFrame where each row represents a pixel as a polygon.
+    It allows fast preview of raster properties, pixel-wise spatialization, and direct integration with the UrbanMapper factory.
 
     Attributes:
-        file_path (str): Chemin vers le fichier raster à charger.
-        data (numpy.ndarray): Tableau contenant les données raster chargées.
-        meta (dict): Métadonnées du raster (dimensions, CRS, etc.).
+        file_path (str): Path to the raster file to load.
+        gdf (geopandas.GeoDataFrame): GeoDataFrame where each row is a pixel (with geometry, area, coordinates, and value).
+        meta (dict): Raster metadata (dimensions, CRS, etc.).
 
-    Exemple:
-        >>> loader = RasterLoader(file_path="mon_raster.tif")
-        >>> raster = loader._load_data_from_file()
+    Example:
+        >>> loader = RasterLoader(file_path="my_raster.tif")
+        >>> gdf = loader._load_data_from_file()
+        >>> gdf.head()
         >>> print(loader.preview())
     """
+
     def __init__(
         self,
         file_path: str,
@@ -32,59 +37,148 @@ class RasterLoader(LoaderBase):
         **kwargs
     ):
         super().__init__(file_path)
-        # Les autres paramètres sont ignorés mais acceptés pour compatibilité
+        # Other parameters are ignored but accepted for compatibility
 
 
-    def _load_data_from_file(self) -> Any:
+    def _load_data_from_file(self) -> gpd.GeoDataFrame:
         """
-        Charge les données raster depuis le fichier et stocke les métadonnées.
+        Loads raster data and returns a GeoDataFrame where each row represents a pixel as a polygon.
+        NoData pixels are included with value set to None.
 
-        Returns:
-            numpy.ndarray: Les données raster chargées (tableau numpy).
-
+        Returns :
+        -------
+            gpd.GeoDataFrame
+            A GeoDataFrame with columns: pixel_id, row, col, area, latitude, longitude, value, geometry.
         Raises:
-            RuntimeError: Si le fichier ne peut pas être lu.
+            RuntimeError: If there is an error while loading the raster file.        
         """
         try:
-            # Ouvre le fichier raster avec rasterio
+            # Open the raster file with rasterio
             with rasterio.open(self.file_path) as src:
-                # Lit toutes les bandes du raster
-                self.data = src.read()
-                # Stocke les métadonnées du raster
-                self.meta = src.meta
-            # Retourne les données raster
-            return self.data
+                band1 = src.read(1)  # Read the first band
+                transform = src.transform
+                raster_crs = src.crs
+                height, width = band1.shape
+            
+            # Prepare lists to store pixel data
+            pixel_ids = []
+            rows = []
+            cols = []
+            areas = []
+            lats = []
+            lons = []
+            values = []
+            polygons = []
+
+            # Prepare transformer for CRS conversion (if needed)
+            crs_is_geographic = CRS.from_user_input(raster_crs).is_geographic
+            
+            if crs_is_geographic:
+                # Use EPSG:3857 (Web Mercator) for area calculation
+                metric_crs = CRS.from_epsg(3857)
+                transformer_to_metric = Transformer.from_crs(raster_crs, metric_crs, always_xy=True)
+                transformer_to_wgs84 = Transformer.from_crs(raster_crs, "EPSG:4326", always_xy=True)
+            else:
+                metric_crs = raster_crs
+                transformer_to_wgs84 = Transformer.from_crs(raster_crs, "EPSG:4326", always_xy=True)
+                        
+            pixel_id = 0
+
+            for row in range(height):
+                for col in range(width):
+                    
+                    value = band1[row, col]
+                     # Check for NoData (handles both nodata_value and NaN)
+                    if nodata_value is not None and value == nodata_value:
+                        value_out = None
+                    elif np.isnan(value):
+                        value_out = None
+                    else:
+                        value_out = value
+
+                    if np.isnan(value):
+                        continue
+
+                    # Compute the coordinates of the four corners of the pixel
+                    # Upper left
+                    ulx, uly = xy(transform, row, col, offset='ul')
+                    # Upper right
+                    urx, ury = xy(transform, row, col + 1, offset='ul')
+                    # Lower right
+                    lrx, lry = xy(transform, row + 1, col + 1, offset='ul')
+                    # Lower left
+                    llx, lly = xy(transform, row + 1, col, offset='ul')
+
+                    # Build the polygon (in raster CRS)
+                    poly = Polygon([(ulx, uly), (urx, ury), (lrx, lry), (llx, lly)])
+
+                    # Compute the area in m²
+                    if crs_is_geographic:
+                        # Reproject polygon to metric CRS for area calculation
+                        poly_metric = gpd.GeoSeries([poly], crs=raster_crs).to_crs(metric_crs).iloc[0]
+                        area_m2 = poly_metric.area
+                    else:
+                        area_m2 = poly.area
+
+                    # Compute centroid for lat/lon
+                    centroid_x, centroid_y = poly.centroid.x, poly.centroid.y
+                    lon, lat = transformer_to_wgs84.transform(centroid_x, centroid_y)
+
+                    # Store data
+                    pixel_ids.append(pixel_id)
+                    rows.append(row)
+                    cols.append(col)
+                    areas.append(area_m2)
+                    lats.append(lat)
+                    lons.append(lon)
+                    values.append(value_out)
+                    polygons.append(poly)
+                    pixel_id += 1
+            
+            # Build the GeoDataFrame
+            gdf = gpd.GeoDataFrame({
+                "pixel_id": pixel_ids,
+                "row": rows,
+                "col": cols,
+                "area": areas,
+                "latitude": lats,
+                "longitude": lons,
+                "value": values,
+                "geometry": polygons
+            }, crs=raster_crs)
+
+            # Store for direct display
+            self.gdf = gdf
+
+            return gdf
+
         except Exception as e:
-            # En cas d'erreur, lève une exception avec un message explicite
-            raise RuntimeError(f"Erreur lors du chargement du raster : {e}")
+            # In case of error, raise an exception with an explicit message
+            raise RuntimeError(f"Error while loading raster: {e}")
 
     def preview(self, format: str = "ascii") -> Any:
         """
-        Génère un aperçu du raster chargé.
+        Generates a preview of the loaded raster information.
 
         Args:
-            format (str): Format de sortie ("ascii" pour affichage texte, "json" pour dictionnaire).
+            format (str): Output format ("ascii" for text display, "json" for dictionary).
 
         Returns:
-            str ou dict: Un résumé des propriétés du raster.
+            str or dict: A summary of the raster properties.
 
         Raises:
-            ValueError: Si le format demandé n'est pas supporté.
+            ValueError: If the requested format is not supported.
 
-        Exemple:
-            >>> loader = RasterLoader(file_path="mon_raster.tif")
-            >>> loader._load_data_from_file()
-            >>> print(loader.preview())
         """
-        # Si les métadonnées ne sont pas chargées, tente de les charger
+        # If metadata is not loaded, try to load it
         if self.meta is None:
             try:
                 with rasterio.open(self.file_path) as src:
                     self.meta = src.meta
             except Exception as e:
-                return f"Impossible d'ouvrir le raster : {e}"
+                return f"Unable to open raster: {e}"
 
-        # Récupère les informations principales du raster
+        # Get main raster information
         shape = (
             self.meta.get("count", "?"),
             self.meta.get("height", "?"),
@@ -93,13 +187,13 @@ class RasterLoader(LoaderBase):
         dtype = self.meta.get("dtype", "?")
         crs = self.meta.get("crs", "?")
 
-        # Retourne l'aperçu selon le format demandé
+        # Return preview according to requested format
         if format == "ascii":
             return (
                 f"Loader: RasterLoader\n"
-                f"  Fichier: {self.file_path}\n"
-                f"  Dimensions (bandes, hauteur, largeur): {shape}\n"
-                f"  Type de données: {dtype}\n"
+                f"  File: {self.file_path}\n"
+                f"  Dimensions (bands, height, width): {shape}\n"
+                f"  Data type: {dtype}\n"
                 f"  CRS: {crs}"
             )
         elif format == "json":
@@ -111,6 +205,6 @@ class RasterLoader(LoaderBase):
                 "crs": str(crs)
             }
         else:
-            raise ValueError(f"Format non supporté : {format}")
+            raise ValueError(f"Unsupported format: {format}")
 
 
