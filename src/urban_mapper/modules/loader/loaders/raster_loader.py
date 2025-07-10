@@ -59,6 +59,7 @@ class RasterLoader(LoaderBase):
                 transform = src.transform
                 raster_crs = src.crs
                 height, width = band1.shape
+                nodata_value = src.nodata
             
             # Prepare lists to store pixel data
             pixel_ids = []
