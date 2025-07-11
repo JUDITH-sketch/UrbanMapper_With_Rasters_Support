@@ -4,6 +4,7 @@ from typing import Any  # For type annotation in preview
 import numpy as np  
 import geopandas as gpd
 from shapely.geometry import Polygon
+from shapely.geometry import box  
 from rasterio.transform import xy
 from pyproj import CRS,Transformer
 
@@ -53,106 +54,58 @@ class RasterLoader(LoaderBase):
             RuntimeError: If there is an error while loading the raster file.        
         """
         try:
-            # Open the raster file with rasterio
-            with rasterio.open(self.file_path) as src:
-                band1 = src.read(1)  # Read the first band
+            with rasterio.open(file_path) as src:         
+                band = src.read(1)
                 transform = src.transform
-                raster_crs = src.crs
-                height, width = band1.shape
-                nodata_value = src.nodata
+                crs = src.crs
+                nodata = src.nodata
+                height, width = band.shape
+
+            # Flatten indices
+            rows, cols = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
+            rows_flat = rows.ravel()
+            cols_flat = cols.ravel()
+            values_flat = band.ravel()
             
-            # Prepare lists to store pixel data
-            pixel_ids = []
-            rows = []
-            cols = []
-            areas = []
-            lats = []
-            lons = []
-            values = []
-            polygons = []
-
-            # Prepare transformer for CRS conversion (if needed)
-            crs_is_geographic = CRS.from_user_input(raster_crs).is_geographic
-            
-            if crs_is_geographic:
-                # Use EPSG:3857 (Web Mercator) for area calculation
-                metric_crs = CRS.from_epsg(3857)
-                transformer_to_metric = Transformer.from_crs(raster_crs, metric_crs, always_xy=True)
-                transformer_to_wgs84 = Transformer.from_crs(raster_crs, "EPSG:4326", always_xy=True)
-            else:
-                metric_crs = raster_crs
-                transformer_to_wgs84 = Transformer.from_crs(raster_crs, "EPSG:4326", always_xy=True)
-                        
-            pixel_id = 0
-
-            for row in range(height):
-                for col in range(width):
-                    
-                    value = band1[row, col]
-                     # Check for NoData (handles both nodata_value and NaN)
-                    if nodata_value is not None and value == nodata_value:
-                        value_out = None
-                    elif np.isnan(value):
-                        value_out = None
-                    else:
-                        value_out = value
-
-                    if np.isnan(value):
-                        continue
-
-                    # Compute the coordinates of the four corners of the pixel
-                    # Upper left
-                    ulx, uly = xy(transform, row, col, offset='ul')
-                    # Upper right
-                    urx, ury = xy(transform, row, col + 1, offset='ul')
-                    # Lower right
-                    lrx, lry = xy(transform, row + 1, col + 1, offset='ul')
-                    # Lower left
-                    llx, lly = xy(transform, row + 1, col, offset='ul')
-
-                    # Build the polygon (in raster CRS)
-                    poly = Polygon([(ulx, uly), (urx, ury), (lrx, lry), (llx, lly)])
-
-                    # Compute the area in m²
-                    if crs_is_geographic:
-                        # Reproject polygon to metric CRS for area calculation
-                        poly_metric = gpd.GeoSeries([poly], crs=raster_crs).to_crs(metric_crs).iloc[0]
-                        area_m2 = poly_metric.area
-                    else:
-                        area_m2 = poly.area
-
-                    # Compute centroid for lat/lon
-                    centroid_x, centroid_y = poly.centroid.x, poly.centroid.y
-                    lon, lat = transformer_to_wgs84.transform(centroid_x, centroid_y)
-
-                    # Store data
-                    pixel_ids.append(pixel_id)
-                    rows.append(row)
-                    cols.append(col)
-                    areas.append(area_m2)
-                    lats.append(lat)
-                    lons.append(lon)
-                    values.append(value_out)
-                    polygons.append(poly)
-                    pixel_id += 1
-            
-            # Build the GeoDataFrame
+            # Handle nodata
+            if nodata is not None:
+                values_flat = np.where(values_flat == nodata, None, values_flat)
+        
+            # Compute pixel bounds (vectorized)
+            x_min, y_max = rasterio.transform.xy(transform, rows_flat, cols_flat, offset='ul')
+            x_max, y_min = rasterio.transform.xy(transform, rows_flat, cols_flat, offset='lr')
+    
+            # Create polygons
+            polygons = [box(xmin, ymin, xmax, ymax) for xmin, ymin, xmax, ymax in zip(x_min, y_min, x_max, y_max)]
+    
+            # Build GeoDataFrame
             gdf = gpd.GeoDataFrame({
-                "pixel_id": pixel_ids,
-                "row": rows,
-                "col": cols,
-                "area": areas,
-                "latitude": lats,
-                "longitude": lons,
-                "value": values,
-                "geometry": polygons
-            }, crs=raster_crs)
-
-            # Store for direct display
-            self.gdf = gdf
-
+                'pixel_id': np.arange(len(values_flat)),
+                'row': rows_flat,
+                'col': cols_flat,
+                'value': values_flat,
+                'geometry': polygons
+            }, crs=crs)
+    
+            # Calculate pixel area (projected CRS)
+            if CRS.from_user_input(crs).is_projected:
+                pixel_area = abs(transform.a * transform.e)
+                gdf['area'] = pixel_area
+            else:
+                # Reproject polygons to a metric CRS for area calculation
+                metric_crs = CRS.from_epsg(3857)
+                gdf_metric = gdf.to_crs(metric_crs)
+                gdf['area'] = gdf_metric.geometry.area
+    
+            # Compute centroid lat/lon in batch
+            centroids = gdf.geometry.centroid
+            transformer = Transformer.from_crs(crs, 'EPSG:4326', always_xy=True)
+            lon, lat = transformer.transform(centroids.x.values, centroids.y.values)
+            gdf['longitude'] = lon
+            gdf['latitude'] = lat
+    
             return gdf
-
+        
         except Exception as e:
             # In case of error, raise an exception with an explicit message
             raise RuntimeError(f"Error while loading raster: {e}")
