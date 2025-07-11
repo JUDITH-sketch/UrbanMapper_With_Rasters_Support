@@ -40,7 +40,7 @@ class RasterLoader(LoaderBase):
         super().__init__(file_path)
         # Other parameters are ignored but accepted for compatibility
 
-    def _load_data_from_file(self.file_path) -> gpd.GeoDataFrame:
+    def _load_data_from_file(self) -> gpd.GeoDataFrame:
         """
         Loads raster data and returns a GeoDataFrame where each row represents a pixel as a polygon.
         NoData pixels are included with value set to None.
@@ -53,7 +53,7 @@ class RasterLoader(LoaderBase):
             RuntimeError: If there is an error while loading the raster file.        
         """
         try:
-            with rasterio.open() as src:         
+            with rasterio.open(self.file_path) as src:         
                 band = src.read(1)
                 transform = src.transform
                 crs = src.crs
