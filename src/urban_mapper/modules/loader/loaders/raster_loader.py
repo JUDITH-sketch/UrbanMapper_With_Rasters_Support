@@ -15,17 +15,25 @@ class RasterLoader(LoaderBase):
 
     This loader reads raster files and exposes their content as a GeoDataFrame where each row represents a pixel as a polygon.
     It allows fast preview of raster properties, pixel-wise spatialization, and direct integration with the UrbanMapper factory.
+    It's an optimized version of RasterLoader with gdf return.
 
     Attributes:
         file_path (str): Path to the raster file to load.
         gdf (geopandas.GeoDataFrame): GeoDataFrame where each row is a pixel (with geometry, area, coordinates, and value).
         meta (dict): Raster metadata (dimensions, CRS, etc.).
+        bounds (tuple): Geographic extent of the raster as (left, bottom, right, top).
 
     Example:
-        >>> loader = RasterLoader(file_path="my_raster.tif")
-        >>> gdf = loader._load_data_from_file()
-        >>> gdf.head()
-        >>> print(loader.preview())
+         >>> rst_loader = (
+                mapper
+                .loader # From the loader module
+                .from_file("file_path.tif") # To update with your own path
+            )
+        >>> gdf = rst_loader.load() # Load the data and return data 
+        >>> gdf       
+        >>> meta = rst_loader._instance.meta
+        >>> bounds = rst_loader._instance.bounds
+    
     """
 
     def __init__(
@@ -50,7 +58,8 @@ class RasterLoader(LoaderBase):
             gpd.GeoDataFrame
             A GeoDataFrame with columns: pixel_id, row, col, area, latitude, longitude, value, geometry.
         Raises:
-            RuntimeError: If there is an error while loading the raster file.        
+            RuntimeError: If there is an error while loading the raster file.  
+        NB : the loader doesn't return metadata and bounds, but they are stored in the instance attributes (cf docstring example).           
         """
         try:
             with rasterio.open(self.file_path) as src:         
@@ -59,6 +68,9 @@ class RasterLoader(LoaderBase):
                 crs = src.crs
                 nodata = src.nodata
                 height, width = band.shape
+
+                self.meta = src.meta  # Store metadata for later use
+                self.bounds = src.bounds  # Store bounds for later use
 
             # Flatten indices
             rows, cols = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
