@@ -1,125 +1,127 @@
 from ..abc_loader import LoaderBase
-import rasterio  # To read raster files
-from typing import Any  # For type annotation in preview
-import numpy as np  
+import rasterio
+from typing import Any
+import numpy as np
 import geopandas as gpd
+from shapely.geometry import Point
 from shapely.geometry import Polygon
-from shapely.geometry import box  
 from rasterio.transform import xy
-from pyproj import CRS,Transformer
+from pyproj import CRS, Transformer
 
-class RasterLoader(LoaderBase):
-    
+class RasterLoader:
     """
-    Loader for raster files (GeoTIFF, PNG+world file, etc.).
-
-    This loader reads raster files and exposes their content as a GeoDataFrame where each row represents a pixel as a polygon.
-    It allows fast preview of raster properties, pixel-wise spatialization, and direct integration with the UrbanMapper factory.
-    It's an optimized version of RasterLoader with gdf return.
-
-    Attributes:
-        file_path (str): Path to the raster file to load.
-        gdf (geopandas.GeoDataFrame): GeoDataFrame where each row is a pixel (with geometry, area, coordinates, and value).
-        meta (dict): Raster metadata (dimensions, CRS, etc.).
-        bounds (tuple): Geographic extent of the raster as (left, bottom, right, top).
-
-    Example:
-         >>> rst_loader = (
-                mapper
-                .loader # From the loader module
-                .from_file("file_path.tif") # To update with your own path
-            )
-        >>> gdf = rst_loader.load() # Load the data and return data 
-        >>> gdf       
-        >>> meta = rst_loader._instance.meta
-        >>> bounds = rst_loader._instance.bounds
-    
+    Loader for raster files with block-wise downsampling (average pooling) and centroids as geometry.
+    Returns a GeoDataFrame where each row corresponds to an aggregated pixel (block).
     """
 
-    def __init__(
-        self,
-        file_path: str,
-        latitude_column=None,
-        longitude_column=None,
-        coordinate_reference_system=None,
-        map_columns=None,
-        **kwargs
-    ):
-        super().__init__(file_path)
-        # Other parameters are ignored but accepted for compatibility
+    def __init__(self, file_path, block_size=10, **kwargs):   # block_size est le facteur de downsampling (4x4 par défaut)
+        self.file_path = file_path
+        self.block_size = block_size
+        self.meta = None
+        self.bounds = None
+
+    def _downsample_band(self, band):
+        """
+        Effectue le downsampling par blocs et calcule la moyenne pour chaque bloc non-recouvrant.
+        """
+        h, w = band.shape
+        bs = self.block_size
+
+        # Découpe l'image aux dimensions multiples du block_size pour éviter les bords incomplets
+        h_ds = h // bs
+        w_ds = w // bs
+        band_cropped = band[:h_ds * bs, :w_ds * bs]
+
+        # Remodèle pour avoir un 4D (h_blocks, block_size, w_blocks, block_size) puis moyenne par bloc
+        band_blocks = band_cropped.reshape(h_ds, bs, w_ds, bs)
+        band_ds = band_blocks.mean(axis=(1, 3))  # moyenne sur les axes blocs internes
+
+        return band_ds
 
     def _load_data_from_file(self) -> gpd.GeoDataFrame:
-        """
-        Loads raster data and returns a GeoDataFrame where each row represents a pixel as a polygon.
-        NoData pixels are included with value set to None.
-
-        Returns :
-        -------
-            gpd.GeoDataFrame
-            A GeoDataFrame with columns: pixel_id, row, col, area, latitude, longitude, value, geometry.
-        Raises:
-            RuntimeError: If there is an error while loading the raster file.  
-        NB : the loader doesn't return metadata and bounds, but they are stored in the instance attributes (cf docstring example).           
-        """
         try:
-            with rasterio.open(self.file_path) as src:         
+            with rasterio.open(self.file_path) as src:
                 band = src.read(1)
                 transform = src.transform
                 crs = src.crs
                 nodata = src.nodata
-                height, width = band.shape
 
-                self.meta = src.meta  # Store metadata for later use
-                self.bounds = src.bounds  # Store bounds for later use
+                self.meta = src.meta
+                self.bounds = src.bounds
 
-            # Flatten indices
-            rows, cols = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
-            rows_flat = rows.ravel()
-            cols_flat = cols.ravel()
-            values_flat = band.ravel()
-            
-            # Handle nodata
-            if nodata is not None:
-                values_flat = np.where(values_flat == nodata, None, values_flat)
-        
-            # Compute pixel bounds (vectorized)
-            x_min, y_max = rasterio.transform.xy(transform, rows_flat, cols_flat, offset='ul')
-            x_max, y_min = rasterio.transform.xy(transform, rows_flat, cols_flat, offset='lr')
-    
-            # Create polygons
-            polygons = [box(xmin, ymin, xmax, ymax) for xmin, ymin, xmax, ymax in zip(x_min, y_min, x_max, y_max)]
-    
-            # Build GeoDataFrame
-            gdf = gpd.GeoDataFrame({
-                'pixel_id': np.arange(len(values_flat)),
-                'row': rows_flat,
-                'col': cols_flat,
-                'value': values_flat,
-                'geometry': polygons
-            }, crs=crs)
-    
-            # Calculate pixel area (projected CRS)
-            if CRS.from_user_input(crs).is_projected:
-                pixel_area = abs(transform.a * transform.e)
-                gdf['area'] = pixel_area
-            else:
-                # Reproject polygons to a metric CRS for area calculation
-                metric_crs = CRS.from_epsg(3857)
-                gdf_metric = gdf.to_crs(metric_crs)
-                gdf['area'] = gdf_metric.geometry.area
-    
-            # Compute centroid lat/lon in batch
-            centroids = gdf.geometry.centroid
-            transformer = Transformer.from_crs(crs, 'EPSG:4326', always_xy=True)
-            lon, lat = transformer.transform(centroids.x.values, centroids.y.values)
-            gdf['longitude'] = lon
-            gdf['latitude'] = lat
-    
-            return gdf
-        
+                # Handle NoData: met à NaN pour la moyenne
+                if nodata is not None:
+                    band = np.where(band == nodata, np.nan, band)
+
+                # Downsampling
+                band_ds = self._downsample_band(band)
+                h_ds, w_ds = band_ds.shape
+
+                # Génère les indices ligne/colonne de chaque pixel agrégé
+                rows, cols = np.indices((h_ds, w_ds))
+
+                # Calcule la position du centre de chaque bloc dans l'image d'origine
+                bs = self.block_size
+                center_rows = rows * bs + bs // 2
+                center_cols = cols * bs + bs // 2
+
+                # Transform raster to world coordinates for block centers
+                xs, ys = rasterio.transform.xy(transform, center_rows, center_cols)
+                xs = np.array(xs).flatten()
+                ys = np.array(ys).flatten()
+
+                # Calcul des valeurs
+                values = band_ds.flatten()
+
+                # Geometry = centre (comme un Point)
+                geoms = []
+                for r, c in zip(center_rows.flatten(), center_cols.flatten()):
+                    # (r, c) = ligne et colonne du bloc (dans la grille agrégée)
+                    min_row = r - bs // 2
+                    min_col = c - bs // 2
+                    max_row = min_row + bs
+                    max_col = min_col + bs
+
+                    # On récupère les coordonnées des 4 coins du pixel agrégé :
+                    corners = [
+                        rasterio.transform.xy(transform, min_row, min_col, offset='ul'),  # haut-gauche
+                        rasterio.transform.xy(transform, min_row, max_col, offset='ur'),  # haut-droit
+                        rasterio.transform.xy(transform, max_row, max_col, offset='lr'),  # bas-droit
+                        rasterio.transform.xy(transform, max_row, min_col, offset='ll')   # bas-gauche
+                    ]
+                    poly = Polygon(corners)
+                    geoms.append(poly)
+
+                # Latitude/Longitude par transformation CRS → WGS84
+                transformer = Transformer.from_crs(crs, 4326, always_xy=True)
+                lon, lat = transformer.transform(xs, ys)
+                
+                # Aire pour chaque bloc (en unités CRS projeté) — zone du bloc
+                if CRS.from_user_input(crs).is_projected:
+                    pixel_width = abs(transform.a)
+                    pixel_height = abs(transform.e)
+                    area = (pixel_width * pixel_height) * (bs * bs)
+                    areas = np.full(values.shape, area)
+                else:
+                    areas = [None] * values.size  # Hors CRS projeté, zone complexe : à raffiner si utile
+
+                # Création du GeoDataFrame
+                gdf = gpd.GeoDataFrame({
+                    'pixel_id': np.arange(len(values)),
+                    'row': rows.flatten(),
+                    'col': cols.flatten(),
+                    'area': areas,
+                    'value': values,
+                    'latitude': lat,
+                    'longitude': lon,
+                    'geometry': geoms
+                }, crs=crs)
+
+                return gdf
+
         except Exception as e:
-            # In case of error, raise an exception with an explicit message
-            raise RuntimeError(f"Error while loading raster: {e}")
+            raise RuntimeError(f"Error while loading downsampled raster: {e}")
+
 
     def preview(self, format: str = "ascii") -> Any:
         """
