@@ -33,7 +33,9 @@ By default, `raster_loader.py` contains loader v6. To run UrbanMapper with a dif
 
 UrbanMapper must be installed to use this fork (install in development mode to access local modifications). Installation instructions are available in the repository.
 
+## 💾 Data Access
+All raster data used in the projects is available here: https://github.com/JUDITH-sketch/Rasters_Studies_for_UrbanMapper-OSCUR/tree/main/Data
 ## 🌿 Branch Information
 
-I worked on: https://github.com/VIDA-NYU/UrbanMapper/tree/feat/backup_support_raster_data
+I worked on: https://github.com/VIDA-NYU/UrbanMapper/tree/feat/support_raster_data
 This branch contains my raster-related contributions to the
